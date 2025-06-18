@@ -6,116 +6,93 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Peminjaman;
 use App\Models\Barang;
-use Illuminate\Support\Facades\DB;
 
 class PeminjamanApiController extends Controller
 {
+    // GET /api/peminjaman
     public function index()
     {
-        $peminjamans = Peminjaman::with('barang')->get();
-        return response()->json($peminjamans);
+        $data = Peminjaman::with('barang')->get(); // relasi barang
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Daftar peminjaman',
+            'data' => $data,
+        ]);
     }
 
+    // POST /api/peminjaman
     public function store(Request $request)
     {
         $validated = $request->validate([
             'peminjam' => 'required|string|max:255',
             'barang_id' => 'required|exists:barangs,id',
+            'jumlah_pinjam' => 'required|integer|min:1',
             'tgl_dipinjam' => 'required|date',
             'tgl_kembali' => 'required|date|after_or_equal:tgl_dipinjam',
         ]);
 
-        $validated['status'] = 'Pending';
-        
+        $barang = Barang::find($validated['barang_id']);
+
+        if ($barang->stock_barang < $validated['jumlah_pinjam']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Stok barang tidak mencukupi',
+                'stock_barang' => $barang->stock_barang,
+            ], 422);
+        }
+
         $peminjaman = Peminjaman::create($validated);
 
         return response()->json([
+            'success' => true,
             'message' => 'Peminjaman berhasil ditambahkan',
-            'data' => $peminjaman
+            'data' => $peminjaman,
         ], 201);
     }
 
-    public function destroy($id)
+    // GET /api/peminjaman/siap-kembali - Peminjaman yang siap dikembalikan
+    public function siapKembali()
     {
-        $peminjaman = Peminjaman::findOrFail($id);
-        $peminjaman->delete();
-
-        return response()->json(['message' => 'Peminjaman berhasil dihapus']);
-    }
-
-    public function updateStatus(Request $request, $id)
-    {
-        $request->validate([
-            'status' => 'required|string',
-            'tgl_kembali' => 'nullable|date'
-        ]);
-
-        $peminjaman = Peminjaman::findOrFail($id);
-        $peminjaman->update([
-            'status' => $request->status,
-            'tgl_kembali' => $request->tgl_kembali,
-        ]);
-
-        return response()->json(['message' => 'Status berhasil diperbarui', 'data' => $peminjaman]);
-    }
-
-    public function pengembalian()
-    {
-        $peminjamans = Peminjaman::with('barang')->where('status', 'Pending')->get();
-        return response()->json($peminjamans);
-    }
-
-    public function prosesKembali($id)
-    {
-        DB::beginTransaction();
-
         try {
-            $peminjaman = Peminjaman::findOrFail($id);
+            // Hanya peminjaman yang sudah disetujui dan belum dikembalikan
+            $data = Peminjaman::with('barang')
+                ->where('status', 'Disetujui') // Hanya yang sudah di-ACC
+                ->whereDoesntHave('pengembalian') // Belum dikembalikan
+                ->get();
 
-            if ($peminjaman->status !== 'Pending') {
-                return response()->json(['error' => 'Hanya peminjaman dengan status Pending yang dapat dikembalikan.'], 400);
-            }
-
-            $barang = Barang::findOrFail($peminjaman->barang_id);
-            $barang->stok += 1;
-            $barang->save();
-
-            $peminjaman->status = 'Selesai';
-            $peminjaman->save();
-
-            DB::commit();
-
-            return response()->json(['message' => 'Pengembalian berhasil diproses.']);
+            return response()->json([
+                'success' => true,
+                'message' => 'Daftar peminjaman yang siap dikembalikan',
+                'data' => $data,
+            ]);
         } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['error' => 'Terjadi kesalahan: ' . $e->getMessage()], 500);
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data peminjaman: ' . $e->getMessage()
+            ], 500);
         }
     }
 
-    public function acc($id)
+    // GET /api/peminjaman/belum-kembali - Semua peminjaman yang belum dikembalikan (termasuk pending/ditolak)
+    public function belumKembali()
     {
-        $peminjaman = Peminjaman::findOrFail($id);
-        $barang = Barang::findOrFail($peminjaman->barang_id);
+        try {
+            // Ambil semua peminjaman yang belum ada di tabel pengembalian
+            $data = Peminjaman::with('barang')
+                ->whereDoesntHave('pengembalian')
+                ->get();
 
-        if ($barang->stok < 1) {
-            return response()->json(['error' => 'Stok barang tidak mencukupi.'], 400);
+            return response()->json([
+                'success' => true,
+                'message' => 'Daftar peminjaman yang belum dikembalikan',
+                'data' => $data,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data peminjaman: ' . $e->getMessage()
+            ], 500);
         }
-
-        $barang->stok -= 1;
-        $barang->save();
-
-        $peminjaman->status = 'Pending';
-        $peminjaman->save();
-
-        return response()->json(['message' => 'Peminjaman disetujui.']);
-    }
-
-    public function reject($id)
-    {
-        $peminjaman = Peminjaman::findOrFail($id);
-        $peminjaman->status = 'Ditolak';
-        $peminjaman->save();
-
-        return response()->json(['message' => 'Peminjaman berhasil ditolak.']);
     }
 }

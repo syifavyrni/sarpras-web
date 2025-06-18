@@ -13,15 +13,15 @@ return new class extends Migration
     {
         Schema::create('pengembalians', function (Blueprint $table) {
             $table->id();
-            $table->string('peminjam');
-            $table->string('barang');
-            $table->date('tgl_kembali');
-            $table->enum('status', ['Pending','Dipinjam', 'Dikembalikan']);
+            $table->foreignId('peminjaman_id')->constrained('peminjamans')->onDelete('cascade');
+            $table->date('tgl_dikembalikan');
             $table->enum('kondisi', ['baik', 'rusak'])->default('baik');
+            $table->text('catatan')->nullable();
             $table->integer('denda')->default(0);
+            $table->text('alasan_denda')->nullable();
+            $table->enum('status', ['Pending', 'Diterima', 'Ditolak'])->default('Pending');
             $table->timestamps();
         });
-        
     }
 
     /**

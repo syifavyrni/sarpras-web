@@ -15,7 +15,7 @@ class PeminjamanController extends Controller
         $barangs = Barang::all();
         $peminjamans = Peminjaman::with('barang')->get();
         return view('peminjaman.index', compact('peminjamans', 'barangs'));
-    }   
+    }
 
     // Halaman tambah peminjaman
     public function create()
@@ -24,17 +24,26 @@ class PeminjamanController extends Controller
         return view('peminjaman.create', compact('barangs'));
     }
 
-    // Simpan data peminjaman
+    // Simpan data peminjaman dengan validasi stok
     public function store(Request $request)
     {
         $validated = $request->validate([
             'peminjam' => 'required|string|max:255',
             'barang_id' => 'required|exists:barangs,id',
+            'jumlah_pinjam' => 'required|integer|min:1',
             'tgl_dipinjam' => 'required|date',
             'tgl_kembali' => 'required|date|after_or_equal:tgl_dipinjam',
         ]);
 
-        $validated['status'] = 'Pending'; // default status saat simpan
+        // Validasi stok sebelum menyimpan
+        $barang = Barang::findOrFail($validated['barang_id']);
+        if ($barang->stock_barang < $validated['jumlah_pinjam']) {
+            return redirect()->back()
+                ->withInput()
+                ->with('error', "Stok barang tidak mencukupi. Stok tersedia: {$barang->stock_barang}, diminta: {$validated['jumlah_pinjam']}");
+        }
+
+        $validated['status'] = 'Pending';
         Peminjaman::create($validated);
 
         return redirect()->back()->with('success', 'Peminjaman berhasil ditambahkan!');
@@ -58,68 +67,148 @@ class PeminjamanController extends Controller
         return back()->with('success', 'Status berhasil diperbarui.');
     }
 
-    // ✅ Menampilkan daftar pengembalian
+    // Menampilkan daftar pengembalian
     public function pengembalian()
     {
         $peminjamans = Peminjaman::with('barang')
-                            ->where('status', 'Pending') // hanya yang belum selesai
-                            ->get();
+            ->where('status', 'Disetujui') // Ubah ke 'Disetujui' karena yang bisa dikembalikan hanya yang sudah disetujui
+            ->get();
         return view('peminjaman.pengembalian', compact('peminjamans'));
     }
 
-    // ✅ Proses pengembalian
+    // Proses pengembalian
     public function prosesKembali($id)
     {
         DB::beginTransaction();
         try {
             $peminjaman = Peminjaman::findOrFail($id);
 
-            if ($peminjaman->status !== 'Pending') {
-                return redirect()->back()->with('error', 'Hanya peminjaman dengan status Pending yang dapat dikembalikan.');
+            if ($peminjaman->status !== 'Disetujui') {
+                DB::rollBack();
+                return redirect()->back()->with('error', 'Hanya peminjaman yang sudah disetujui yang dapat dikembalikan.');
             }
 
-            // Kembalikan stok
             $barang = Barang::findOrFail($peminjaman->barang_id);
-            $barang->stok += 1; // diasumsikan jumlah = 1
+            $barang->stock_barang += $peminjaman->jumlah_pinjam; // Kembalikan sesuai jumlah pinjam
             $barang->save();
 
             $peminjaman->status = 'Selesai';
             $peminjaman->save();
 
             DB::commit();
-            return redirect()->back()->with('success', 'Pengembalian berhasil diproses.');
+            return redirect()->back()->with('success', "Pengembalian berhasil diproses. Stok {$barang->nama_barang} bertambah {$peminjaman->jumlah_pinjam} unit.");
         } catch (\Exception $e) {
             DB::rollBack();
             return redirect()->back()->with('error', 'Terjadi kesalahan: ' . $e->getMessage());
         }
     }
 
-    // ✅ Menerima/menyetujui peminjaman
+    // Menerima/menyetujui peminjaman dengan validasi stok yang lebih detail
     public function acc($id)
     {
-        $peminjaman = Peminjaman::findOrFail($id);
-        $barang = Barang::findOrFail($peminjaman->barang_id);
+        DB::beginTransaction();
+        try {
+            $peminjaman = Peminjaman::findOrFail($id);
 
-        if ($barang->stok < 1) {
-            return redirect()->back()->with('error', 'Stok barang tidak mencukupi.');
+            if ($peminjaman->status !== 'Pending') {
+                DB::rollBack();
+                return redirect()->back()->with('error', 'Peminjaman ini sudah diproses sebelumnya.');
+            }
+
+            $barang = Barang::findOrFail($peminjaman->barang_id);
+
+            if ($barang->stock_barang < $peminjaman->jumlah_pinjam) {
+                DB::rollBack();
+                return redirect()->back()->with('error', "Stok barang tidak mencukupi. Stok tersedia: {$barang->stock_barang}, diminta: {$peminjaman->jumlah_pinjam}");
+            }
+
+            // Kurangi stok
+            $barang->stock_barang -= $peminjaman->jumlah_pinjam;
+            $barang->save();
+
+            // Update status peminjaman
+            $peminjaman->status = 'Disetujui';
+            $peminjaman->save();
+
+            DB::commit();
+            return redirect()->back()->with('success', "Peminjaman disetujui. Stok {$barang->nama_barang} berkurang {$peminjaman->jumlah_pinjam} unit.");
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()->with('error', 'Terjadi kesalahan: ' . $e->getMessage());
         }
-
-        $barang->stok -= 1;
-        $barang->save();
-
-        $peminjaman->status = 'Pending'; // atau langsung 'Selesai' jika ingin dianggap langsung digunakan
-        $peminjaman->save();
-
-        return redirect()->back()->with('success', 'Peminjaman disetujui.');
     }
 
-    // ✅ Menolak peminjaman
+    // Menolak peminjaman
     public function reject($id)
     {
         $peminjaman = Peminjaman::findOrFail($id);
+
+        if ($peminjaman->status !== 'Pending') {
+            return redirect()->back()->with('error', 'Peminjaman ini sudah diproses sebelumnya.');
+        }
+
         $peminjaman->status = 'Ditolak';
         $peminjaman->save();
 
         return redirect()->back()->with('success', 'Peminjaman berhasil ditolak.');
+    }
+
+    // API endpoints untuk Flutter
+    public function apiIndex()
+    {
+        try {
+            $peminjamans = Peminjaman::with('barang')->get();
+            return response()->json([
+                'success' => true,
+                'data' => $peminjamans
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function apiStore(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'peminjam' => 'required|string|max:255',
+                'barang_id' => 'required|exists:barangs,id',
+                'jumlah_pinjam' => 'required|integer|min:1',
+                'tgl_dipinjam' => 'required|date',
+                'tgl_kembali' => 'required|date|after_or_equal:tgl_dipinjam',
+            ]);
+
+            // Validasi stok
+            $barang = Barang::findOrFail($validated['barang_id']);
+            if ($barang->stock_barang < $validated['jumlah_pinjam']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Stok barang tidak mencukupi. Stok tersedia: {$barang->stock_barang}, diminta: {$validated['jumlah_pinjam']}"
+                ], 400);
+            }
+
+            $validated['status'] = 'Pending';
+            $peminjaman = Peminjaman::create($validated);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Peminjaman berhasil ditambahkan!',
+                'data' => $peminjaman->load('barang')
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak valid',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

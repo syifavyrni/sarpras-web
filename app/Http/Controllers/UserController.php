@@ -1,9 +1,8 @@
 <?php
-
 namespace App\Http\Controllers;
-
 use Illuminate\Http\Request;
 use App\Models\User;
+use Illuminate\Support\Facades\Hash;
 
 class UserController extends Controller
 {
@@ -21,13 +20,15 @@ class UserController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'username' => 'required|unique:users,username',
+            'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
+            'password' => 'required|min:8',
         ]);
 
         User::create([
-            'username' => $request->username,
+            'username' => $request->name, // Save name as username
             'email' => $request->email,
+            'password' => Hash::make($request->password),
         ]);
 
         return redirect()->route('users.index')->with('success', 'User created successfully.');
@@ -41,14 +42,22 @@ class UserController extends Controller
     public function update(Request $request, User $user)
     {
         $request->validate([
-            'username' => 'required|unique:users,username,' . $user->id,
+            'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email,' . $user->id,
+            'password' => 'nullable|min:8',
         ]);
 
-        $user->update([
-            'username' => $request->username,
+        $updateData = [
+            'username' => $request->name, // Update username with name value
             'email' => $request->email,
-        ]);
+        ];
+
+        // Only update password if provided
+        if ($request->filled('password')) {
+            $updateData['password'] = Hash::make($request->password);
+        }
+
+        $user->update($updateData);
 
         return redirect()->route('users.index')->with('success', 'User updated successfully.');
     }
@@ -56,7 +65,6 @@ class UserController extends Controller
     public function destroy(User $user)
     {
         $user->delete();
-
         return redirect()->route('users.index')->with('success', 'User deleted successfully.');
     }
 }

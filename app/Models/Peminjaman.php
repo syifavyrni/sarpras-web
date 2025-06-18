@@ -13,13 +13,21 @@ class Peminjaman extends Model
     protected $table = 'peminjamans';
 
     protected $fillable = [
-        'peminjam', 'barang_id', 'tgl_dipinjam', 'tgl_kembali', 'status'
+        'peminjam',
+        'barang_id',
+        'tgl_dipinjam',
+        'tgl_kembali',
+        'status',
+        'jumlah_pinjam'
     ];
 
     public function barang()
     {
         return $this->belongsTo(Barang::class);
     }
+
+    public function pengembalian()
+    {
+        return $this->hasOne(Pengembalian::class, 'peminjaman_id');
+    }
 }
-
-

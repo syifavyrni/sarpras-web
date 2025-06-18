@@ -13,7 +13,7 @@ use App\Http\Controllers\UserController;
 Route::get('/', function () {
     return redirect('login');
 });
-    
+
 // Login
 Route::get('login', [AuthController::class, 'showLoginForm'])->name('login');
 Route::post('login', [AuthController::class, 'login']);
@@ -44,13 +44,20 @@ Route::put('barang/update/{id}', [BarangController::class, 'update'])->name('bar
 
 //Peminjaman
 Route::resource('peminjaman', PeminjamanController::class);
+Route::post('/peminjaman/{id}/acc', [PeminjamanController::class, 'acc'])->name('peminjaman.acc');
+Route::post('/peminjaman/{id}/reject', [PeminjamanController::class, 'reject'])->name('peminjaman.reject');
 Route::post('peminjaman-create', [PeminjamanController::class, 'store'])->name('peminjaman.store');
 Route::post('peminjaman/updateStatus/{id}', [PeminjamanController::class, 'updateStatus'])->name('peminjaman.updateStatus');
 
-//Pengembalian
-Route::resource('pengembalian', PengembalianController::class);
-Route::post('/peminjaman/store', [PengembalianController::class, 'store'])->name('pengembalian.store');
-    
+//Pengembalian (Admin)
+Route::resource('pengembalian', PengembalianController::class)->except(['create', 'store']);
+Route::post('/pengembalian/{id}/terima', [PengembalianController::class, 'terima'])->name('pengembalian.terima');
+Route::post('/pengembalian/{id}/tolak', [PengembalianController::class, 'tolak'])->name('pengembalian.tolak');
+
+//Pengembalian (User)
+Route::get('/ajukan-pengembalian', [PengembalianController::class, 'create'])->name('pengembalian.create');
+Route::post('/ajukan-pengembalian', [PengembalianController::class, 'store'])->name('pengembalian.store');
+
 // Laporan Peminjaman
 Route::get('/laporan/peminjaman', [LaporanController::class, 'peminjamanIndex'])->name('laporan.peminjaman');
 Route::get('/laporan/peminjaman/print', [LaporanController::class, 'peminjamanPrint'])->name('laporan.peminjaman.print');
@@ -65,9 +72,3 @@ Route::get('/laporan/pengembalian', [LaporanController::class, 'pengembalianInde
 
 //User
 Route::resource('users', UserController::class);
-
-
-
-
-
-
